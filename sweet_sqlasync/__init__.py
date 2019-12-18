@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -8,7 +9,6 @@ from typing import (
     Protocol,
     List,
     cast,
-    Union
 )
 
 from aiopg.sa import Engine, SAConnection, create_engine
@@ -21,10 +21,10 @@ from sqlalchemy.ext.declarative import DeclarativeMeta
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import Mapper
 from sqlalchemy.orm.attributes import InstrumentedAttribute
-from sqlalchemy.orm.base import DEFAULT_STATE_ATTR, _generative, instance_dict, instance_state
+from sqlalchemy.orm.base import DEFAULT_STATE_ATTR, instance_dict, instance_state
 from sqlalchemy.orm.exc import NoResultFound, MultipleResultsFound
 from sqlalchemy.sql import ClauseElement
-from sqlalchemy.sql.elements import Grouping, BinaryExpression
+from sqlalchemy.sql.elements import Grouping
 
 logger = getLogger(__name__)
 
@@ -80,7 +80,7 @@ def _set_key(instance: T, *values: Any) -> None:
         setattr(instance, key, values[x])
 
 
-class _Facade:
+class _SyncFacade:
     def __init__(self, awaitable: Callable[..., Awaitable[T]]) -> None:
         self.awaitable = awaitable
 
@@ -136,7 +136,7 @@ class BaseModelClass:
                 values.pop(col, None)
         return values
 
-    @_Facade.decorate
+    @_SyncFacade.decorate
     async def delete(self, connection: SAConnection) -> None:
         cursor = None
         try:
@@ -147,7 +147,7 @@ class BaseModelClass:
             if cursor is not None:
                 cursor.close()
 
-    @_Facade.decorate
+    @_SyncFacade.decorate
     async def refresh(self, connection: SAConnection) -> None:
         res = dict(
             await first(
@@ -157,7 +157,7 @@ class BaseModelClass:
         for key, value in res.items():
             setattr(self, key, value)
 
-    @_Facade.decorate
+    @_SyncFacade.decorate
     async def save(
             self, connection: SAConnection, only_fields: Optional[Iterable[str]] = None,
             force_insert: bool = False
@@ -197,7 +197,7 @@ class BaseModelClass:
                 cursor.close()
         return False
 
-    @_Facade.decorate
+    @_SyncFacade.decorate
     async def upsert(self, connection, constraint_column=None):
         if constraint_column not in [column.name for column in self.__table__.c]:
             raise Exception(f"Invalid constraint_column {constraint_column}")
@@ -230,9 +230,9 @@ class BaseModelClass:
 R = TypeVar('R')
 
 
-def _check_conn(meth: Callable[['AsyncQuery'], Awaitable[R]]) -> Callable[['AsyncQuery'], Awaitable[R]]:
+def _check_conn(meth: Callable[[AsyncQuery], Awaitable[R]]) -> Callable[[AsyncQuery], Awaitable[R]]:
     @wraps(meth)
-    async def wrapper(self: 'AsyncQuery', *args: Any, **kwargs: Any) -> R:
+    async def wrapper(self: AsyncQuery, *args: Any, **kwargs: Any) -> R:
 
         if (
                 self._async_conn is None
@@ -268,24 +268,24 @@ class AsyncQuery(orm.Query):
         self._entities = []
         super().__init__(entities, session)
 
-    @_generative()
-    def with_async_conn(self, conn: SAConnection) -> None:
+    def with_async_conn(self, conn: SAConnection) -> AsyncQuery:
         self._async_conn = conn
         self._sync_conn = None
+        return self
 
-    @_generative()
-    def with_sync_conn(self, conn: Connectable) -> None:
+    def with_sync_conn(self, conn: Connectable) -> AsyncQuery:
         self._sync_conn = conn
         self._async_conn = None
+        return self
 
-    @_generative()
-    def auto_connection(self) -> None:
+    def auto_connection(self) -> AsyncQuery:
         """
         Allows not to specify connection manually.
         If uses in `app.models.bases.connection_context`, connection from that context will be used
         (see its documentation for details)
         """
         self._auto_connection = True
+        return self
 
     @_check_conn
     async def all(self) -> List[Any]:
@@ -338,7 +338,7 @@ class AsyncQuery(orm.Query):
         return res.rowcount
 
     @_check_conn
-    async def get(self, obj_id: Any) -> Any:
+    async def get(self, obj_id: Any) -> Any: # type: ignore[override]
         obj_class = self._entity_zero().class_._instantiate
         obj = await self.filter(obj_class.id == obj_id).first()  # type: ignore[no-untyped-call]
         if obj is None:
