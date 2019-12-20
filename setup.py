@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='sweet-sqlasync',
-    version='0.0.1',
+    version='0.0.2',
     packages=find_packages(),
     url='https://github.com/aCLr/sweet-sqlasync',
     classifiers=[
@@ -13,12 +13,6 @@ setup(
     author='antonio_antuan',
     author_email='a.ch.clr@gmail.com',
     description='Syntax sugar for SQLAlchemy + aiopg',
-    test_suite='tests',
-    test_requires=[
-        'pytest',
-        'sqlalchemy-stubs',
-        'pytest-runner',
-    ],
     install_requires=[
         'psycopg2==2.8.4',
         'aiopg',
