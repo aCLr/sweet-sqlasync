@@ -1,5 +1,6 @@
 import os
 
+from sqlalchemy import func
 from sqlalchemy.orm.exc import NoResultFound
 
 from sweet_sqlasync import connection_context, get_engine
@@ -92,7 +93,7 @@ async def test_delete_by_model():
 
 
 @pytest.mark.asyncio
-async def test_save_by_model():
+async def test_update_by_model():
     async with connection_context() as conn:
         init_model = await Model.query.auto_connection().first()
         init_dict = _to_dict(init_model)
@@ -104,6 +105,20 @@ async def test_save_by_model():
             await transaction.rollback()
     model = await Model.query.auto_connection().get((init_model.id, init_model.sub_id))
     assert _to_dict(model) == init_dict
+
+
+@pytest.mark.asyncio
+async def test_save_new_by_model():
+    async with connection_context() as conn:
+        max_id = await Model.query.with_entities(func.max(Model.id)).auto_connection().scalar()
+        # alter sequence manually because of manual insert id value
+        await conn.execute("SELECT setval('models_id_seq', %s, true)", (max_id,))
+        m = Model(sub_id=321, key='new_model_key', value='new_model_value')
+        await m.save(conn)
+    assert m.id == max_id + 1
+    assert m.sub_id == 321
+    assert m.key == 'new_model_key'
+    assert m.value == 'new_model_value'
 
 
 @pytest.mark.asyncio

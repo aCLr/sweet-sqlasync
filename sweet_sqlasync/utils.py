@@ -13,14 +13,14 @@ from sqlalchemy.orm.mapper import Mapper
 from sqlalchemy.sql.elements import BooleanClauseList
 
 if TYPE_CHECKING:
-    from sweet_sqlasync import AsyncQuery
+    from sweet_sqlasync.query import AsyncQuery
 
 
 class ModelProtocol(Protocol):
     __mapper__: Mapper
     __table__: Table
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         pass
 
 

@@ -1,12 +1,15 @@
 import asyncio
 from functools import wraps
-from typing import (Any, Awaitable, Callable, Collection, Dict, Optional,
-                    TypeVar, Union)
+from typing import (
+    Any, Awaitable, Callable, Collection, Dict, Optional,
+    TypeVar, Union, Type
+)
 
 from aiopg.sa import SAConnection  # type: ignore[import]
 from sqlalchemy import Column, Table
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapper
+from sqlalchemy.sql.dml import ValuesBase
 
 from sweet_sqlasync.execute import first
 from sweet_sqlasync.query import AsyncQuery
@@ -18,13 +21,13 @@ class class_property:
     def __init__(self, prop):
         self._prop = prop
 
-    def __get__(self, instance, owner):
+    def __get__(self, instance: Any, owner: Type[Any]):
         return self._prop(owner)
 
 
 def _prepare_saving(
     instance: MT,
-    only_fields: Optional[Collection[Union[Column, str]]] = None,
+    only_fields: Optional[Collection[Union['Column[Any]', str]]] = None,
     force_insert: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -42,11 +45,11 @@ class BaseModel:
     __mapper__: Mapper
     __table__: Table
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)  # type: ignore[call-arg]
 
     @class_property
-    def query(self):
+    def query(self) -> AsyncQuery:
         return AsyncQuery(self)
 
     async def delete(self, connection: SAConnection) -> None:
@@ -71,46 +74,34 @@ class BaseModel:
     async def save(
         self,
         connection: SAConnection,
-        only_fields: Optional[Collection[Union[Column, str]]] = None,
+        only_fields: Optional[Collection[Union['Column[Any]', str]]] = None,
         force_insert: bool = False,
     ) -> bool:
         values = _prepare_saving(
             self, only_fields=only_fields, force_insert=force_insert,
         )
 
-        async def _execute(query, values):
+        async def _execute(query: ValuesBase, values: Dict[str, Any]) -> bool:
             cursor = await connection.execute(
-                query.values(**values).returning(*self.__mapper__.primary_key.columns)
+                query.values(**values).returning(*[c for c, _ in _iter_pkey_col_and_val(self)])
             )
             try:
                 if cursor.returns_rows:
                     _id = await cursor.first()
-                    if _id:
-                        self._set_key(*_id)
-                        return True
-                else:
-                    return cursor.rowcount > 0
-            finally:
-                cursor.close()
-
-        if not _get_key(self) or (force_insert is True):
-            # INSERT flow
-            return await _execute(self.__table__.insert(), values)
-
-        else:
-            cursor = await connection.execute(
-                self.__table__.update()
-                .where(_get_pk_filter_clause(self))
-                .values(**values)
-            )
-            try:
-                if cursor.rowcount:
+                    _set_key(self, _id)
                     return True
+                else:
+                    return bool(cursor.rowcount > 0)
             finally:
                 cursor.close()
-        return False
+        query: ValuesBase
+        if not all(_get_key(self)) or (force_insert is True):
+            query = self.__table__.insert()
+        else:
+            query = self.__table__.update().where(_get_pk_filter_clause(self))
+        return await _execute(query, values)
 
-    async def upsert(self, connection, constraint_column=None):
+    async def upsert(self, connection: SAConnection, constraint_column=None) -> bool:
         if constraint_column not in [column.name for column in self.__table__.c]:
             raise Exception(f"Invalid constraint_column {constraint_column}")
 
@@ -132,11 +123,10 @@ class BaseModel:
         try:
             if cursor.returns_rows:
                 _id = await cursor.first()
-                if _id:
-                    _set_key(*_id)
-                    return True
+                _set_key(self, _id)
+                return True
             else:
-                return cursor.rowcount > 0
+                return bool(cursor.rowcount > 0)
         finally:
             cursor.close()
 
