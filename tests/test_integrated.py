@@ -130,3 +130,22 @@ async def test_refresh_by_model():
             await Model.query.filter(Model.id == init_model.id).with_async_conn(another_conn).update({Model.value: 'updated'})
         await init_model.refresh(conn)
         assert init_model.value == 'updated'
+
+
+@pytest.mark.asyncio
+async def test_query_yield_per():
+    async with connection_context():
+        x = 0
+        async for row in Model.query.auto_connection().yield_per(1):
+            assert tuple(_to_dict(row).values()) == PARAMS_TO_INSERT[x]
+            x += 1
+
+        fetched = 0
+        async for row in Model.query.auto_connection().yield_per(2):
+            fetched += 1
+        assert fetched == len(PARAMS_TO_INSERT)
+
+        fetched = 0
+        async for row in Model.query.auto_connection().yield_per(5):
+            fetched += 1
+        assert fetched == len(PARAMS_TO_INSERT)

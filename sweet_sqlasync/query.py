@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from functools import wraps
-from typing import (Any, Awaitable, Callable, Collection, Coroutine, Dict,
-                    List, Optional, Type, TypeVar, Union)
+from typing import (
+    Any, Awaitable, Callable, Collection, Coroutine, Dict,
+    List, Optional, Type, TypeVar, AsyncContextManager
+)
 
 from aiopg.sa import SAConnection  # type: ignore[import]
+from aiopg.sa.result import ResultProxy
 from mypy_extensions import Arg
 from sqlalchemy import alias, and_, func, orm, select
 from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
@@ -18,28 +21,32 @@ from .utils import MT, _get_table, _instantiate, _iter_pkey_col_and_val
 R = TypeVar("R")
 
 
+def _check_conn(query) -> Callable[[], AsyncContextManager[None]]:
+    if query._async_conn is None and not query._auto_connection:
+        raise ValueError("connection for query not specified")
+    elif query._auto_connection:
+
+        @asynccontextmanager
+        async def context():
+            async with connection_context() as conn:
+                query._async_conn = conn
+                yield
+            query._async_conn = None
+
+    else:
+
+        @asynccontextmanager
+        async def context():  # dummy context
+            yield
+    return context
+
 def _check_conn_variadic(
     meth: Callable[[AsyncQuery, Any], Awaitable[R]]
 ) -> Callable[[AsyncQuery, Any], Awaitable[R]]:
     @wraps(meth)
     async def wrapper(self: AsyncQuery, *args: Any) -> R:
 
-        if self._async_conn is None and not self._auto_connection:
-            raise ValueError("connection for query not specified")
-        elif self._auto_connection:
-
-            @asynccontextmanager
-            async def context():
-                async with connection_context() as conn:
-                    self._async_conn = conn
-                    yield
-                self._async_conn = None
-
-        else:
-
-            @asynccontextmanager
-            async def context():  # dummy context
-                yield
+        context = _check_conn(self)
 
         async with context():
             return await meth(self, *args)
@@ -52,24 +59,7 @@ def _check_conn_no_args(
 ) -> Callable[[Arg(AsyncQuery, "self")], Coroutine[Any, Any, R]]:
     @wraps(meth)
     async def wrapper(self: AsyncQuery) -> R:
-
-        if self._async_conn is None and not self._auto_connection:
-            raise ValueError("connection for query not specified")
-        elif self._auto_connection:
-
-            @asynccontextmanager
-            async def context():
-                async with connection_context() as conn:
-                    self._async_conn = conn
-                    yield
-                self._async_conn = None
-
-        else:
-
-            @asynccontextmanager
-            async def context():  # dummy context
-                yield
-
+        context = _check_conn(self)
         async with context():
             return await meth(self)
 
@@ -157,6 +147,19 @@ class AsyncQuery(orm.Query):
             raise MultipleResultsFound("Multiple rows were found for get()")
         else:
             return obj[0]
+
+    async def yield_per(self, count):
+        context = _check_conn(self)
+        async with context():
+            res: ResultProxy = await self._async_conn.execute(self.statement)
+            async with res.cursor:
+                fetched = 0
+                while fetched < res.rowcount:
+                    rows = await res.fetchmany(count)
+                    cls_ = self._entity_zero().class_
+                    fetched += len(rows)
+                    for row in rows:
+                        yield _instantiate(cls_, row)
 
     @_check_conn_no_args
     async def one(self) -> MT:  # type: ignore[override]
