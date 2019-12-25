@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='sweet-sqlasync',
-    version='0.0.1b1',
+    version='0.0.1b2',
     packages=find_packages(),
     url='https://github.com/aCLr/sweet-sqlasync',
     classifiers=[

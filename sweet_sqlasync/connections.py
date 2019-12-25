@@ -5,6 +5,7 @@ from typing import AsyncIterator, Optional
 
 from aiopg.sa import (Engine, SAConnection,  # type: ignore[import]
                       create_engine)
+from aiopg.sa.engine import get_dialect
 from sqlalchemy.engine.url import make_url
 
 logger = getLogger(__name__)
@@ -29,13 +30,18 @@ async def init_db(
     minsize: int = 1,
     maxsize: int = 10,
     recycle: int = 60,
-) -> SAConnection:
+    json_serializer=None
+) -> Engine:
     global __engine
     if __engine is not None:
         raise EngineInitializationError("connection already initialized")
-
+    if json_serializer is not None:
+        dialect = get_dialect(json_serializer=json_serializer)
+    else:
+        dialect = get_dialect()
     __engine = await create_engine(
         **make_url(connection_url).translate_connect_args(username="user"),
+        dialect=dialect,
         echo=echo,
         minsize=minsize,
         maxsize=maxsize,
