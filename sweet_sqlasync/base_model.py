@@ -28,17 +28,11 @@ class class_property:
 def _prepare_saving(
     instance: MT,
     only_fields: Optional[Collection[Union['Column[Any]', str]]] = None,
-    force_insert: bool = False,
 ) -> Dict[str, Any]:
     """
     Returns primary key field and values, which need to be saved
     """
-    values = _to_dict(instance, only_fields=only_fields)
-
-    if not force_insert is False:
-        for column, _ in _iter_pkey_col_and_val(instance):
-            values.pop(column.key, None)
-    return values
+    return _to_dict(instance, only_fields=only_fields)
 
 
 class BaseModel:
@@ -78,7 +72,7 @@ class BaseModel:
         force_insert: bool = False,
     ) -> bool:
         values = _prepare_saving(
-            self, only_fields=only_fields, force_insert=force_insert,
+            self, only_fields=only_fields
         )
 
         async def _execute(query: ValuesBase, values: Dict[str, Any]) -> bool:
@@ -95,7 +89,7 @@ class BaseModel:
             finally:
                 cursor.close()
         query: ValuesBase
-        if not all(_get_key(self)) or (force_insert is True):
+        if not all(_get_key(self)) or force_insert:
             query = self.__table__.insert()
         else:
             query = self.__table__.update().where(_get_pk_filter_clause(self))
